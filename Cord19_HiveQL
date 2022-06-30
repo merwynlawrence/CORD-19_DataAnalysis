@@ -1,0 +1,103 @@
+--PREPROCESSING
+
+
+---The scimagojr dataset was first downloaded to the local system. 
+---Then it was uploaded into Databricks using the GUI into /Filestore/tables 
+
+
+CREATE TABLE IF NOT EXISTS scimagojr
+USNG CSV
+OPTIONS (path = "", header = "TRUE", inferschema= "true", delimiter= ";");
+
+
+---------------------
+
+Whereas the metadata was directly imported from the S3 bucket as shown below:
+
+CREATE TABLE IF NOT EXISTS metadata
+USNG CSV
+OPTIONS (path = "s3://ai2semanticscholar-cord19/2020-07-01/metadata.csv, header = "TRUE", inferschema= "true", delimiter= ",");
+
+
+-------------------
+
+-- Find the 5 most common journals, list them along with their frequencies
+
+SELECT journal, count(*) as frequency
+FROM metadata
+WHERE journal IS NOT NULL
+GROUP BY journal
+ORDER BY frequency DESC
+LIMIT 5;
+
+-------------------------------------------------
+
+-- The top 5 average abstract lengths (ie. number of words) per journal.
+SELECT journal, round(avg(size(split(abstract, " "))),2) as abstract_length
+FROM metadata
+WHERE abstract != ' '
+GROUP BY journal
+ORDER BY abstract_length DESC
+LIMIT 5;
+
+-----------------------------------------------------
+--  The the titles of the 5 papers with the highest number of authors 
+SELECT  title, sum(size(split(authors, ";"))) as NoOfAuthors
+FROM metadata
+GROUP BY title
+ORDER BY NoOfAuthors DESC
+LIMIT 5;
+
+------------------------------------------------------
+--  The top 5 most prolific authors along with the number of papers they have contributed to.
+SELECT trim(exp.x) AS Authors_Name count(*) as Paper_Contributions
+FROM  (SELECT explode(split(authors, ";")) as x FROM metadata) exp 
+GROUP BY Author_Name
+ORDER BY Paper_Contributions DESC
+LIMIT 5;
+
+---------------------------------------------------------
+
+-- top 5 authors with their respective H index’s. 
+---we use both metadata and scimagojr datasets. 
+
+--1 create a view showing title and the respective ‘h index’ of the journal
+CREATE VIEW IF NOT EXISTS H AS 
+SELECT Title AS title, `H index`
+FROM scimangojr;
+
+--2 select the Title and Author Columns from metadata
+CREATE VIEW IF NOT EXISTS A AS 
+SELECT xyz.title, trim(xyz.a) AS Authors
+FROM (SELECT journal AS title, explode(split(authors, ";")) as a FROM metadata) xyz
+WHERE xyz.title IS NOT NULL;
+
+--3 Join the two Views with the corresponding title names
+CREATE VIEW IF NOT EXISTS joined_view AS
+SELECT A.title AS Title, A.Authors AS Authors, H.`H index` AS h_index
+FROM A JOIN H
+ON (A.title = H.title);
+
+--4 Authors with h index
+SELECT Authors, sum(h_index) AS `Total H index` 
+FROM joined_view
+GROUP BY Authors
+ORDER BY `Total H index` DESC
+LIMIT 5
+
+----------------------------------------------------------
+-- Plot the number of papers per month since Jan 2020.
+
+CREATE VIEW IF NOT EXISTS monthsin2020 AS
+SELECT publish_time AS months
+FROM metadata
+WHERE publish_time LIKE '202_-%';
+
+
+--2 Extract the frequencies of the respective months
+
+CREATE VIEW IF NOT EXISTS PaperPerMonth AS
+SELECT LEFT(months, 7) as months, count(*) as Count
+FROM monthsin2020 
+GROUP BY LEFT(months, 7)
+ORDER BY months;
